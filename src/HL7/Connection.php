@@ -127,7 +127,7 @@ class Connection
      * @throws ReflectionException
      * @access public
      */
-    public function send(Message $msg, string $responseCharEncoding = 'UTF-8', bool $noWait = false): ?Message
+    public function send(Message $msg, string $responseCharEncoding = 'UTF-8', bool $noWait = false, int $expectedMessages = 1, bool $abortOnNack = true): ?Message
     {
         $message = $this->MESSAGE_PREFIX . $msg->toString(true) . $this->MESSAGE_SUFFIX; // As per MLLP protocol
         if (!socket_write($this->socket, $message, strlen($message))) {
@@ -141,30 +141,45 @@ class Connection
         $data = null;
 
         $startTime = time();
-        while (($buf = socket_read($this->socket, 1024)) !== false) { // Read ACK / NACK from server
-            $data .= $buf;
-            if (preg_match('/' . $this->MESSAGE_SUFFIX . '$/', $data)) {
-                break;
+        $messageList = [];
+        while (count($messageList) < $expectedMessages) {
+            while (($buf = socket_read($this->socket, 1024)) !== false) { // Read ACK / NACK from server
+                $data .= $buf;
+                if (preg_match('/' . $this->MESSAGE_SUFFIX . '$/', $data)) {
+                    break;
+                }
+                if ((time() - $startTime) > $this->timeout) {
+                    throw new HL7ConnectionException(
+                        "Response partially received. Timed out listening for end-of-message from server"
+                    );
+                }
             }
-            if ((time() - $startTime) > $this->timeout) {
-                throw new HL7ConnectionException(
-                    "Response partially received. Timed out listening for end-of-message from server"
-                );
+
+            if (empty($data)) {
+                throw new HL7ConnectionException("No response received within {$this->timeout} seconds");
+            }
+
+            // Remove message prefix and suffix added by the MLLP server
+            $data = preg_replace('/^' . $this->MESSAGE_PREFIX . '/', '', $data);
+            $data = preg_replace('/' . $this->MESSAGE_SUFFIX . '$/', '', $data);
+
+            // set character encoding
+            $data = mb_convert_encoding($data, $responseCharEncoding);
+
+            $message = new Message($data, null, true, true);
+            $messageList[] = $message;
+
+            if ($abortOnNack) {
+                // On NACK message, abort
+                $msa = $message->getSegmentsByName('MSA')[0];
+                $ackCode = $msa->getAcknowledgementCode();
+                if ($ackCode[1] !== 'A') {
+                    break;
+                }
             }
         }
 
-        if (empty($data)) {
-            throw new HL7ConnectionException("No response received within {$this->timeout} seconds");
-        }
-
-        // Remove message prefix and suffix added by the MLLP server
-        $data = preg_replace('/^' . $this->MESSAGE_PREFIX . '/', '', $data);
-        $data = preg_replace('/' . $this->MESSAGE_SUFFIX . '$/', '', $data);
-
-        // set character encoding
-        $data = mb_convert_encoding($data, $responseCharEncoding);
-
-        return new Message($data, null, true, true);
+        return $expectedMessages == 1 ? reset($messageList) : $messageList;
     }
 
     /*
