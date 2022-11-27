@@ -8,6 +8,7 @@ use Aranyasen\Exceptions\HL7ConnectionException;
 use Aranyasen\Exceptions\HL7Exception;
 use Exception;
 use ReflectionException;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Usage:
@@ -127,8 +128,10 @@ class Connection
      * @throws ReflectionException
      * @access public
      */
-    public function send(Message $msg, string $responseCharEncoding = 'UTF-8', bool $noWait = false, int $expectedMessages = 1, bool $abortOnNack = true): ?Message
+    public function send(Message $msg, string $responseCharEncoding = 'UTF-8', bool $noWait = false, int $expectedMessages = 1, bool $abortOnNack = true)
     {
+
+        
         $message = $this->MESSAGE_PREFIX . $msg->toString(true) . $this->MESSAGE_SUFFIX; // As per MLLP protocol
         if (!socket_write($this->socket, $message, strlen($message))) {
             throw new HL7Exception("Could not send data to server: " . socket_strerror(socket_last_error()));
@@ -143,6 +146,7 @@ class Connection
         $startTime = time();
         $messageList = [];
         while (count($messageList) < $expectedMessages) {
+            $data = null;
             while (($buf = socket_read($this->socket, 1024)) !== false) { // Read ACK / NACK from server
                 $data .= $buf;
                 if (preg_match('/' . $this->MESSAGE_SUFFIX . '$/', $data)) {
@@ -162,10 +166,9 @@ class Connection
             // Remove message prefix and suffix added by the MLLP server
             $data = preg_replace('/^' . $this->MESSAGE_PREFIX . '/', '', $data);
             $data = preg_replace('/' . $this->MESSAGE_SUFFIX . '$/', '', $data);
-
+           
             // set character encoding
             $data = mb_convert_encoding($data, $responseCharEncoding);
-
             $message = new Message($data, null, true, true);
             $messageList[] = $message;
 
@@ -178,7 +181,6 @@ class Connection
                 }
             }
         }
-
         return $expectedMessages == 1 ? reset($messageList) : $messageList;
     }
 
@@ -194,7 +196,7 @@ class Connection
      * Close the socket
      * TODO: Close only when the socket is open
      */
-    private function close(): void
+    public function close(): void
     {
         try {
             socket_close($this->socket);
