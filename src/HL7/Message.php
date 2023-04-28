@@ -6,6 +6,7 @@ namespace Aranyasen\HL7;
 
 use Aranyasen\Exceptions\HL7Exception;
 use InvalidArgumentException;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Class specifying the HL7 message, both request and response.
@@ -80,7 +81,7 @@ class Message
         $this->segments = [];
 
         // Control characters and other HL7 properties
-        $this->segmentSeparator = $hl7Globals['SEGMENT_SEPARATOR'] ?? '\n';
+        $this->segmentSeparator = $hl7Globals['SEGMENT_SEPARATOR'] ?? '\r';
         $this->segmentEndingBar = $hl7Globals['SEGMENT_ENDING_BAR'] ?? true; // '|' at end of each segment
         $this->fieldSeparator = $hl7Globals['FIELD_SEPARATOR'] ?? '|';
         $this->componentSeparator = $hl7Globals['COMPONENT_SEPARATOR'] ?? '^';
@@ -285,6 +286,7 @@ class Message
      */
     public function setSegment(Segment $segment, int $index): bool
     {
+        Log::info('paso por aqui____');
         if (!isset($index) || $index > count($this->segments)) {
             throw new InvalidArgumentException('Index out of range');
         }

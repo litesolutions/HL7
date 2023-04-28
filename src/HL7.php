@@ -5,6 +5,7 @@ namespace Aranyasen;
 use InvalidArgumentException;
 use Aranyasen\HL7\Message;
 use Aranyasen\HL7\Segments\MSH;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The HL7 class is a factory class for HL7 messages.
@@ -27,7 +28,7 @@ class HL7
      */
     public function __construct()
     {
-        $this->hl7Globals['SEGMENT_SEPARATOR'] = '\n';
+        $this->hl7Globals['SEGMENT_SEPARATOR'] = '\r';
         $this->hl7Globals['FIELD_SEPARATOR'] = '|';
         $this->hl7Globals['NULL'] = '""';
         $this->hl7Globals['COMPONENT_SEPARATOR'] = '^';
