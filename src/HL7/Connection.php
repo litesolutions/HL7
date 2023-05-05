@@ -51,7 +51,7 @@ class Connection
      * @param int $timeout Connection timeout
      * @throws HL7ConnectionException
      */
-    public function __construct(string $host, int $port, int $timeout = 10)
+    public function __construct(string $host, int $port, int $timeout = 30)
     {
         if (!extension_loaded('sockets')) {
             throw new HL7ConnectionException('Please install ext-sockets to run Connection');
@@ -70,7 +70,7 @@ class Connection
      * @param int $timeout Connection timeout
      * @throws HL7ConnectionException
      */
-    protected function setSocket(string $host, int $port, int $timeout = 10): void
+    protected function setSocket(string $host, int $port, int $timeout = 30): void
     {
         $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
         if (!$socket) {
@@ -184,6 +184,84 @@ class Connection
         return $expectedMessages == 1 ? reset($messageList) : $messageList;
     }
 
+/**
+     * Sends a Message object over this connection.
+     *
+     * @param Message $msg
+     * @param string $responseCharEncoding The expected character encoding of the response.
+     * @param bool $noWait Do no wait for ACK. Helpful for building load testing tools...
+     * @return Message|null
+     * @throws HL7ConnectionException
+     * @throws HL7Exception
+     * @throws ReflectionException
+     * @access public
+     */
+    public function sendByUniqueId(Message $msg, string $responseCharEncoding = 'UTF-8', bool $noWait = false, string $uniq_id, bool $abortOnNack = true)
+    {
+
+        $info_complete = false;
+        $info_count = 0;
+        $message = $this->MESSAGE_PREFIX . $msg->toString(true) . $this->MESSAGE_SUFFIX; // As per MLLP protocol
+        if (!socket_write($this->socket, $message, strlen($message))) {
+            throw new HL7Exception("Could not send data to server: " . socket_strerror(socket_last_error()));
+        }
+
+        if ($noWait) {
+            return null;
+        }
+
+        $data = null;
+
+        $startTime = time();
+        $messageList = [];
+        
+        while (!$info_complete) {
+            $data = null;
+            while (($buf = socket_read($this->socket, 1024)) !== false) { // Read ACK / NACK from server
+                $data .= $buf;
+                if (preg_match('/' . $this->MESSAGE_SUFFIX . '$/', $data)) {
+                    break;
+                }
+                if ((time() - $startTime) > $this->timeout) {
+                    throw new HL7ConnectionException(
+                        "Response partially received. Timed out listening for end-of-message from server"
+                    );
+                }
+            }
+
+            if (empty($data)) {
+                throw new HL7ConnectionException("No response received within {$this->timeout} seconds");
+            }
+
+            // Remove message prefix and suffix added by the MLLP server
+            $data = preg_replace('/^' . $this->MESSAGE_PREFIX . '/', '', $data);
+            $data = preg_replace('/' . $this->MESSAGE_SUFFIX . '$/', '', $data);
+           
+            // set character encoding
+            $data = mb_convert_encoding($data, $responseCharEncoding);
+            $message = new Message($data, null, true, true);
+            $messageList[] = $message;
+
+            $msa = $message->getSegmentsByName('MSA')[0];
+            $ackCode = $msa->getAcknowledgementCode();
+            if ($abortOnNack) {
+                // On NACK message, abort
+                if ($ackCode[1] !== 'A') {
+                    break;
+                }
+            }
+            Log::info('Identifier');
+            $identifier = $msa->getField(2);
+            Log::info($identifier);
+            if($identifier == $uniq_id)$info_count = $info_count +1;
+            if($identifier == $uniq_id && $ackCode=='CE')$info_complete = true;
+            else if($info_count==2)$info_complete = true;
+
+        }
+        return $messageList;
+    }
+
+    
     /*
      * Return the socket opened/used by this class
      */
